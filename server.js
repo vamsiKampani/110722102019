@@ -1,66 +1,60 @@
 const express = require('express');
 const app = express();
+const { getStockPrices } = require('./mock_data');
+const { computeAverage, computeCorrelation } = require('./utils');
 
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.end('hello world!');
+    res.json({ message: "Stock Price Aggregation Microservice is running!" });
 });
 
-const WINDOW_SIZE = 10;
-let window = [];
 
+app.get('/stocks/:ticker', (req, res) => {
+    const ticker = req.params.ticker;
+    const minutes = parseInt(req.query.minutes);
+    const aggregation = req.query.aggregation || 'average';
 
-const API = {
-    p: 'https://www.randomnumberapi.com/api/v1.0/random?min=2&max=100&count=10', 
-    f: 'https://us-central1-hylomorph-308509.cloudfunctions.net/fibonacci?n=10', 
-    e: 'https://www.randomnumberapi.com/api/v1.0/random?min=2&max=100&count=10', 
-    r: 'https://www.randomnumberapi.com/api/v1.0/random?min=1&max=100&count=10'  
-};
+    const prices = getStockPrices(ticker, minutes);
 
-app.get('/numbers/:numberid', async (req, res) => {
-    const num = req.params.numberid;
-
-    if (!API[num]) {
-        return res.status(400).json({ error: "Invalid numbers ID. Please use 'p', 'f', 'e', or 'r'." });
-    }
-
-    try {
-        const response = await fetch(API[num]);
-        const data = await response.json();
-
-        
-        let newNum;
-
-        if (num === 'f') {
-           
-            newNum = data.result || [];
-        } else {
-            
-            newNum = data || [];
-        }
-
-        const preWindow = [...window];
-        window = [...window, ...newNum];
-
-        if (window.length > WINDOW_SIZE) {
-            window = window.slice(window.length - WINDOW_SIZE);
-        }
-
-        const average = window.reduce((sum, val) => sum + val, 0) / window.length;
-
-        res.json({
-            windowPreState: preWindow,
-            windowCurrState: window,
-            average: average.toFixed(2)
+    if (aggregation === 'average') {
+        const avg = computeAverage(prices);
+        return res.json({
+            averageStockPrice: avg,
+            priceHistory: prices
         });
-    } catch (error) {
-        console.error("Fetch error:", error.message);
-        res.status(500).json({ error: 'Failed to fetch numbers from the external server.' });
     }
+
+    return res.status(400).json({ error: "Unsupported aggregation" });
 });
 
-const port = 9876;
-app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+
+app.get('/stockcorrelation', (req, res) => {
+    const minutes = parseInt(req.query.minutes);
+    const tickers = req.query.ticker;
+
+    if (!tickers || tickers.length !== 2) {
+        return res.status(400).json({ error: "Exactly 2 tickers required" });
+    }
+
+    const [t1, t2] = tickers;
+    const prices1 = getStockPrices(t1, minutes);
+    const prices2 = getStockPrices(t2, minutes);
+
+    const corr = computeCorrelation(prices1, prices2);
+    const avg1 = computeAverage(prices1);
+    const avg2 = computeAverage(prices2);
+
+    return res.json({
+        correlation: corr,
+        stocks: {
+            [t1]: { averagePrice: avg1, priceHistory: prices1 },
+            [t2]: { averagePrice: avg2, priceHistory: prices2 }
+        }
+    });
+});
+
+const PORT = 3000;
+app.listen(PORT, () => {
+    console.log(`Server running at http://localhost:${PORT}`);
 });
